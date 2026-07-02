@@ -1,26 +1,15 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import { formatTime } from '$lib/utils/time';
+	import { currentTime } from '$lib/stores/time';
 
 	export let timezone: string;
+	export let size: 'sm' | 'lg' = 'sm';
 
-	let time = formatTime(timezone);
-	let interval: ReturnType<typeof setInterval>;
-
-	onMount(() => {
-		time = formatTime(timezone);
-		interval = setInterval(() => {
-			time = formatTime(timezone);
-		}, 1000);
-	});
-
-	onDestroy(() => {
-		if (interval) clearInterval(interval);
-	});
-
-	$: if (timezone) {
-		time = formatTime(timezone);
-	}
+	$: time = formatTime(timezone, $currentTime);
 </script>
 
-<span class="font-mono text-sm font-semibold tabular-nums">{time}</span>
+<span
+	class="whitespace-nowrap font-mono font-semibold tabular-nums tracking-tight {size === 'lg'
+		? 'text-2xl sm:text-[28px]'
+		: 'text-[15px]'}">{time}</span
+>
