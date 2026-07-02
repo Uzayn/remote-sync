@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { createEventDispatcher, tick } from 'svelte';
+	import { fade, fly } from 'svelte/transition';
 	import type { Teammate } from '$lib/stores/teammates';
-	import { getAllTimezones, formatTimezoneLabel } from '$lib/utils/time';
+	import { formatTimezoneLabel, getAllTimezones, getCityName } from '$lib/utils/time';
 
 	export let teammate: Teammate | null = null;
 	export let open = false;
@@ -14,32 +14,39 @@
 
 	let name = '';
 	let timezone = '';
-	let avatar = '';
 	let searchQuery = '';
+	let dialog: HTMLDivElement;
+	let nameInput: HTMLInputElement;
+	let previousFocus: HTMLElement | null = null;
+	let wasOpen = false;
 
 	const allTimezones = getAllTimezones();
 
-	$: filteredTimezones = searchQuery
-		? allTimezones.filter(tz =>
-			tz.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			formatTimezoneLabel(tz).toLowerCase().includes(searchQuery.toLowerCase())
-		).slice(0, 50)
-		: allTimezones.slice(0, 50);
-
-	$: if (open) {
-		if (teammate) {
-			name = teammate.name;
-			timezone = teammate.timezone;
-			avatar = teammate.avatar || '';
-		} else {
-			name = '';
-			timezone = '';
-			avatar = '';
-		}
-		searchQuery = '';
-	}
+	$: filteredTimezones = (
+		searchQuery
+			? allTimezones.filter((timezoneOption) =>
+					`${timezoneOption} ${formatTimezoneLabel(timezoneOption)}`
+						.toLowerCase()
+						.includes(searchQuery.toLowerCase())
+				)
+			: allTimezones
+	).slice(0, 60);
 
 	$: isEditing = teammate !== null;
+
+	$: if (open && !wasOpen) {
+		wasOpen = true;
+		previousFocus = document.activeElement as HTMLElement;
+		name = teammate?.name || '';
+		timezone = teammate?.timezone || '';
+		searchQuery = '';
+		tick().then(() => nameInput?.focus());
+	}
+
+	$: if (!open && wasOpen) {
+		wasOpen = false;
+		tick().then(() => previousFocus?.focus());
+	}
 
 	function handleSubmit() {
 		if (!name.trim() || !timezone) return;
@@ -48,7 +55,7 @@
 			id: teammate?.id,
 			name: name.trim(),
 			timezone,
-			avatar: avatar.trim() || undefined
+			avatar: teammate?.avatar
 		});
 
 		handleClose();
@@ -58,120 +65,197 @@
 		dispatch('close');
 	}
 
-	function selectTimezone(tz: string) {
-		timezone = tz;
+	function selectTimezone(timezoneOption: string) {
+		timezone = timezoneOption;
 		searchQuery = '';
+	}
+
+	function handleDialogKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			handleClose();
+			return;
+		}
+
+		if (event.key !== 'Tab' || !dialog) return;
+		const focusable = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		);
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last?.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first?.focus();
+		}
 	}
 </script>
 
 {#if open}
-	<!-- Backdrop -->
-	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-	<div
-		class="fixed inset-0 bg-ink/40 z-40"
+	<button
+		type="button"
+		tabindex="-1"
+		aria-label="Close teammate dialog"
+		class="fixed inset-0 z-40 cursor-default bg-ink/35 backdrop-blur-[2px]"
 		on:click={handleClose}
-		transition:fly={{ duration: 200 }}
-	></div>
+		transition:fade={{ duration: 160 }}
+	></button>
 
-	<!-- Panel: bottom on mobile, right on desktop -->
-	<div
-		class="fixed z-50 bg-cream
-			inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl
-			sm:inset-y-0 sm:right-0 sm:left-auto sm:w-96 sm:max-h-none sm:rounded-none sm:rounded-l-2xl"
-		transition:fly={{ y: 400, x: 0, duration: 300 }}
-	>
-		<!-- Header -->
-		<div class="flex items-center justify-between px-5 py-4 border-b border-ink/10">
-			<h2 class="font-semibold">
-				{isEditing ? 'Edit teammate' : 'Add teammate'}
-			</h2>
-			<button
-				type="button"
-				on:click={handleClose}
-				class="p-1 text-muted hover:text-ink transition-colors"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-				</svg>
-			</button>
-		</div>
-
-		<!-- Form -->
-		<form on:submit|preventDefault={handleSubmit} class="p-5 space-y-5 overflow-y-auto max-h-[calc(85vh-60px)] sm:max-h-[calc(100vh-60px)]">
-			<div>
-				<label for="name" class="block text-sm font-medium text-ink/70 mb-1.5">Name</label>
-				<input
-					type="text"
-					id="name"
-					bind:value={name}
-					placeholder="John Doe"
-					required
-					class="w-full px-3 py-2.5 bg-paper border border-ink/20 rounded-lg focus:border-ink/40 focus:ring-1 focus:ring-ink/10 outline-none text-sm"
-				/>
-			</div>
-
-			<div>
-				<label for="avatar" class="block text-sm font-medium text-ink/70 mb-1.5">
-					Initials <span class="font-normal text-muted">(optional)</span>
-				</label>
-				<input
-					type="text"
-					id="avatar"
-					bind:value={avatar}
-					placeholder="JD"
-					maxlength="2"
-					class="w-full px-3 py-2.5 bg-paper border border-ink/20 rounded-lg focus:border-ink/40 focus:ring-1 focus:ring-ink/10 outline-none text-sm"
-				/>
-			</div>
-
-			<div>
-				<label for="timezone-search" class="block text-sm font-medium text-ink/70 mb-1.5">Timezone</label>
-				<input
-					type="text"
-					id="timezone-search"
-					bind:value={searchQuery}
-					placeholder="Search (e.g. Tokyo, New York...)"
-					class="w-full px-3 py-2.5 bg-paper border border-ink/20 rounded-lg focus:border-ink/40 focus:ring-1 focus:ring-ink/10 outline-none text-sm"
-				/>
-
-				{#if timezone && !searchQuery}
-					<div class="mt-2 px-3 py-2 bg-available/10 text-available rounded-lg text-sm flex items-center gap-2">
-						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-							<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-						</svg>
-						{formatTimezoneLabel(timezone)}
-					</div>
-				{/if}
-
-				<div class="mt-2 max-h-48 overflow-y-auto border border-ink/20 rounded-lg bg-paper">
-					{#each filteredTimezones as tz}
-						<button
-							type="button"
-							on:click={() => selectTimezone(tz)}
-							class="w-full px-3 py-2.5 text-left text-sm hover:bg-ink/5 transition-colors border-b border-ink/5 last:border-b-0 {timezone === tz ? 'bg-ink text-cream' : ''}"
-						>
-							{formatTimezoneLabel(tz)}
-						</button>
-					{/each}
+	<div class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-6">
+		<div
+			bind:this={dialog}
+			role="dialog"
+			tabindex="-1"
+			aria-modal="true"
+			aria-labelledby="teammate-dialog-title"
+			class="flex max-h-[calc(100vh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-[0_24px_70px_rgba(20,31,25,0.18)]"
+			on:keydown={handleDialogKeydown}
+			transition:fly={{ y: 16, duration: 180 }}
+		>
+			<div class="flex items-start justify-between border-b border-line px-5 py-4 sm:px-6 sm:py-5">
+				<div>
+					<p class="eyebrow mb-1">Team member</p>
+					<h2 id="teammate-dialog-title" class="text-lg font-semibold text-ink">
+						{isEditing ? 'Edit teammate' : 'Add teammate'}
+					</h2>
 				</div>
-			</div>
-
-			<div class="flex gap-3 pt-2">
 				<button
 					type="button"
 					on:click={handleClose}
-					class="flex-1 px-4 py-2.5 border border-ink/20 text-ink/60 rounded-lg hover:bg-ink/5 transition-colors text-sm font-medium"
+					class="icon-button -mr-2"
+					aria-label="Close dialog"
 				>
-					Cancel
-				</button>
-				<button
-					type="submit"
-					disabled={!name.trim() || !timezone}
-					class="flex-1 px-4 py-2.5 bg-ink text-cream rounded-lg hover:bg-ink/90 transition-colors text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed"
-				>
-					{isEditing ? 'Save' : 'Add'}
+					<svg
+						class="h-5 w-5"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						stroke-width="1.8"
+						aria-hidden="true"
+					>
+						<path stroke-linecap="round" d="M6 6l12 12M18 6 6 18" />
+					</svg>
 				</button>
 			</div>
-		</form>
+
+			<form on:submit|preventDefault={handleSubmit} class="flex min-h-0 flex-1 flex-col">
+				<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+					<div>
+						<label for="name" class="mb-1.5 block text-sm font-semibold text-ink">Name</label>
+						<input
+							bind:this={nameInput}
+							type="text"
+							id="name"
+							bind:value={name}
+							placeholder="e.g. Maya Chen"
+							autocomplete="off"
+							required
+							class="field-control"
+						/>
+					</div>
+
+					<div>
+						<label for="timezone-search" class="mb-1.5 block text-sm font-semibold text-ink">
+							Timezone
+						</label>
+
+						{#if timezone}
+							<div
+								class="mb-3 flex items-center justify-between rounded-lg border border-accent/15 bg-accent-soft px-3 py-2.5"
+							>
+								<div class="min-w-0">
+									<p class="truncate text-sm font-semibold text-accent">{getCityName(timezone)}</p>
+									<p class="truncate text-xs text-accent/70">{formatTimezoneLabel(timezone)}</p>
+								</div>
+								<svg
+									class="h-5 w-5 shrink-0 text-accent"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+									stroke-width="2"
+									aria-hidden="true"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" />
+								</svg>
+							</div>
+						{/if}
+
+						<div class="relative">
+							<svg
+								class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								aria-hidden="true"
+							>
+								<circle cx="11" cy="11" r="7" />
+								<path stroke-linecap="round" d="m20 20-4-4" />
+							</svg>
+							<input
+								type="search"
+								id="timezone-search"
+								bind:value={searchQuery}
+								placeholder={timezone ? 'Search to change timezone' : 'Search city or timezone'}
+								autocomplete="off"
+								class="field-control pl-9"
+							/>
+						</div>
+
+						{#if searchQuery || !timezone}
+							<div
+								class="mt-2 max-h-52 overflow-y-auto rounded-lg border border-line bg-surface"
+								aria-label="Timezone results"
+							>
+								{#if filteredTimezones.length > 0}
+									{#each filteredTimezones as timezoneOption}
+										<button
+											type="button"
+											on:click={() => selectTimezone(timezoneOption)}
+											class="flex w-full items-center justify-between gap-3 border-b border-line px-3 py-2.5 text-left last:border-0 hover:bg-surface-subtle {timezone ===
+											timezoneOption
+												? 'bg-accent-soft'
+												: ''}"
+										>
+											<span class="min-w-0">
+												<span class="block truncate text-sm font-medium text-ink"
+													>{getCityName(timezoneOption)}</span
+												>
+												<span class="block truncate text-[11px] text-muted">{timezoneOption}</span>
+											</span>
+											<span class="shrink-0 text-xs text-muted"
+												>{formatTimezoneLabel(timezoneOption).match(/\((.*)\)/)?.[1]}</span
+											>
+										</button>
+									{/each}
+								{:else}
+									<p class="px-3 py-8 text-center text-sm text-muted">
+										No matching timezone found.
+									</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<div class="flex gap-3 border-t border-line bg-surface px-5 py-4 sm:justify-end sm:px-6">
+					<button type="button" on:click={handleClose} class="button-secondary flex-1 sm:flex-none">
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={!name.trim() || !timezone}
+						class="button-primary flex-1 sm:flex-none"
+					>
+						{isEditing ? 'Save changes' : 'Add teammate'}
+					</button>
+				</div>
+			</form>
+		</div>
 	</div>
 {/if}

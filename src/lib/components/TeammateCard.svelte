@@ -1,68 +1,161 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import type { Teammate } from '$lib/stores/teammates';
-	import { formatTimezoneLabel, getReachability } from '$lib/utils/time';
+	import { currentTime } from '$lib/stores/time';
+	import {
+		formatRelativeOffset,
+		getCityName,
+		getDayRelation,
+		getReachability
+	} from '$lib/utils/time';
 	import Clock from './Clock.svelte';
-	import TimeIndicator from './TimeIndicator.svelte';
 
 	export let teammate: Teammate;
+	export let myTimezone: string;
+
+	let menuOpen = false;
 
 	const dispatch = createEventDispatcher<{
 		edit: Teammate;
-		delete: string;
+		delete: Teammate;
 	}>();
 
-	$: initials = teammate.avatar || teammate.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-	$: reachability = getReachability(teammate.timezone);
-
-	$: borderColor = {
-		good: 'border-l-available',
-		maybe: 'border-l-caution',
-		avoid: 'border-l-busy'
+	$: initials =
+		teammate.avatar ||
+		teammate.name
+			.split(' ')
+			.map((name) => name[0])
+			.join('')
+			.toUpperCase()
+			.slice(0, 2);
+	$: reachability = getReachability(teammate.timezone, $currentTime);
+	$: status = {
+		good: { label: 'Working hours', className: 'bg-available-soft text-available' },
+		maybe: { label: 'Near working hours', className: 'bg-caution-soft text-caution' },
+		avoid: { label: 'Outside working hours', className: 'bg-busy-soft text-busy' }
 	}[reachability];
+	$: dayRelation = getDayRelation(teammate.timezone, myTimezone, $currentTime);
+	$: relativeOffset = formatRelativeOffset(teammate.timezone, myTimezone, $currentTime);
+
+	function handleWindowKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') menuOpen = false;
+	}
+
+	function handleEdit() {
+		menuOpen = false;
+		dispatch('edit', teammate);
+	}
+
+	function handleDelete() {
+		menuOpen = false;
+		dispatch('delete', teammate);
+	}
 </script>
 
-<div class="group bg-paper border border-ink/10 border-l-4 {borderColor} rounded-lg px-4 py-3 hover:bg-cream transition-colors flex items-center gap-4">
-	<!-- Avatar -->
-	<div class="w-8 h-8 rounded-full bg-ink/5 flex items-center justify-center font-medium text-xs text-muted shrink-0">
+<svelte:window on:click={() => (menuOpen = false)} on:keydown={handleWindowKeydown} />
+
+<article class="relative flex items-center gap-3 px-3 py-4 sm:gap-4 sm:px-5">
+	<div
+		class="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-xs font-semibold text-accent"
+	>
 		{initials}
 	</div>
 
-	<!-- Name & timezone -->
-	<div class="flex-1 min-w-0">
-		<h3 class="font-medium text-sm">{teammate.name}</h3>
-		<p class="text-xs text-muted hidden sm:block truncate">{formatTimezoneLabel(teammate.timezone)}</p>
+	<div class="min-w-0 flex-1">
+		<div class="flex items-center gap-2">
+			<h3 class="truncate text-sm font-semibold text-ink">{teammate.name}</h3>
+			<span
+				class="hidden rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex {status.className}"
+			>
+				{status.label}
+			</span>
+		</div>
+		<p class="mt-0.5 truncate text-xs text-muted">
+			{getCityName(teammate.timezone)}
+			<span aria-hidden="true"> · </span>
+			{relativeOffset}
+		</p>
+		<p class="mt-1 truncate text-[10px] font-semibold sm:hidden {status.className.split(' ')[1]}">
+			{status.label}
+		</p>
 	</div>
 
-	<!-- Time -->
-	<div class="shrink-0">
+	<div class="shrink-0 text-right">
 		<Clock timezone={teammate.timezone} />
+		<p
+			class="mt-0.5 text-[10px] font-medium {dayRelation === 'Today'
+				? 'text-muted'
+				: 'text-caution'}"
+		>
+			{dayRelation}
+		</p>
 	</div>
 
-	<!-- Time of day -->
-	<div class="shrink-0 hidden sm:block">
-		<TimeIndicator timezone={teammate.timezone} />
-	</div>
+	<div class="relative shrink-0">
+		<button
+			type="button"
+			class="icon-button"
+			aria-label={`Actions for ${teammate.name}`}
+			aria-haspopup="menu"
+			aria-expanded={menuOpen}
+			on:click|stopPropagation={() => (menuOpen = !menuOpen)}
+		>
+			<svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<circle cx="5" cy="12" r="1.5" />
+				<circle cx="12" cy="12" r="1.5" />
+				<circle cx="19" cy="12" r="1.5" />
+			</svg>
+		</button>
 
-	<!-- Actions -->
-	<div class="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-		<button
-			on:click={() => dispatch('edit', teammate)}
-			class="p-1.5 text-muted hover:text-ink hover:bg-ink/5 rounded transition-colors"
-			title="Edit"
-		>
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-			</svg>
-		</button>
-		<button
-			on:click={() => dispatch('delete', teammate.id)}
-			class="p-1.5 text-muted hover:text-busy hover:bg-busy/5 rounded transition-colors"
-			title="Delete"
-		>
-			<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-			</svg>
-		</button>
+		{#if menuOpen}
+			<div
+				class="absolute right-0 top-11 z-30 w-36 rounded-lg border border-line bg-surface p-1 shadow-[0_12px_32px_rgba(21,32,26,0.12)]"
+				role="menu"
+				tabindex="-1"
+				on:click|stopPropagation
+				on:keydown={handleWindowKeydown}
+			>
+				<button
+					type="button"
+					class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-ink hover:bg-surface-subtle"
+					role="menuitem"
+					on:click={handleEdit}
+				>
+					<svg
+						class="h-4 w-4 text-muted"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						aria-hidden="true"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="m14.5 5.5 4 4M4 20l4.5-1 10-10a2.12 2.12 0 0 0-3-3l-10 10L4 20Z"
+						/>
+					</svg>
+					Edit
+				</button>
+				<button
+					type="button"
+					class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-danger hover:bg-danger-soft"
+					role="menuitem"
+					on:click={handleDelete}
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+						aria-hidden="true"
+					>
+						<path stroke-linecap="round" d="M5 7h14M9 7V4h6v3m-8 0 1 13h8l1-13" />
+					</svg>
+					Remove
+				</button>
+			</div>
+		{/if}
 	</div>
-</div>
+</article>
